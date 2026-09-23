@@ -454,12 +454,16 @@ def populate_hfpa_database(target_month=None, p2_df=None):
 
 def populate_custom_defect_color_legend(ws, target_month="Jul"):
     """
-    Populate custom defect color key in columns U and V of sheet HFPA.
-    Matches process_ftt.py write_custom_defect_legend & user's reference screenshot:
-    - Merged U:V header for each site ('Site VH', 'Site VH2', 'Site JV', 'Site JV2')
-    - Col U: Color chip filled with exact HEX from Color_template.xlsx (width 5)
-    - Col V: Defect name (width 34), Calibri 9.5pt, left-aligned
-    - Thin black border on all cells
+    Populate custom defect color key placed BELOW the Top 5 Defect table (Rows 48 to 62).
+    Cleanly removes any old legend from columns U and V (Rows 21 to 46).
+    Arranges 4 site palettes in an executive 2x2 grid directly under Columns K through P:
+      - Left Column: Columns K & L (Site VH: Rows 48-54, Site JV: Rows 56-60)
+        Col K = Color Chip (width 11.5)
+        Col L = Defect Name (width 49.8)
+      - Right Column: Columns N & O:P (Site VH2: Rows 48-53, Site JV2: Rows 56-62)
+        Col N = Color Chip (width 13.0)
+        Cols O:P merged = Defect Name (width 13.0 + 30.3 = 43.3)
+      - Column M = Clean vertical spacer column (width 16.0)
     """
     from process_pptx import get_defect_color, load_defect_color_map
     color_template_path = os.path.join(BASE_DIR, "Color_template.xlsx")
@@ -469,78 +473,114 @@ def populate_custom_defect_color_legend(ws, target_month="Jul"):
     fill_hdr = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
     font_hdr = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
     font_txt = Font(name="Calibri", size=9.5, color="000000")
-    thin_border = Border(
-        left=Side(style="thin", color="000000"),
-        right=Side(style="thin", color="000000"),
-        top=Side(style="thin", color="000000"),
-        bottom=Side(style="thin", color="000000"),
-    )
+    thin_black = Side(style="thin", color="000000")
+    thin_border = Border(left=thin_black, right=thin_black, top=thin_black, bottom=thin_black)
+    no_fill = PatternFill(fill_type=None)
 
-    site_rows = {"VH": 21, "VH2": 27, "JV": 33, "JV2": 39}
-
-    ws.column_dimensions["U"].width = 5
-    ws.column_dimensions["V"].width = 34
-
-    # 1. Unmerge any existing merged ranges in columns U & V (cols 21-22) for rows 21..46
+    # 1. Completely clean and unmerge any old legend from columns U and V (cols 21-22)
     merged_to_remove = []
     for rng in list(ws.merged_cells.ranges):
-        if rng.min_col >= 21 and rng.max_col <= 22 and rng.min_row >= 21 and rng.max_row <= 46:
+        if rng.min_col >= 21 and rng.max_col <= 22:
             merged_to_remove.append(rng)
     for rng in merged_to_remove:
         ws.unmerge_cells(str(rng))
 
-    # 2. Clear all values, fills, and borders in cols 21 & 22 for rows 21..46
-    no_fill = PatternFill(fill_type=None)
-    for r in range(21, 47):
+    for r in range(1, 65):
         for c in (21, 22):
             cell = ws.cell(r, c)
             cell.value = None
             cell.fill = no_fill
             cell.border = Border()
 
-    # 3. Populate site headers and defect color chips (strictly capped to 5 defects per site)
-    for fty, start_r in site_rows.items():
-        # Extract defect names from row start_r (cols 13 onwards until empty)
+    # 2. Extract defect names for each site from header rows in Top 5 Defect table
+    site_header_rows = {"VH": 21, "VH2": 27, "JV": 33, "JV2": 39}
+    site_defects = {}
+    for fty, r_hdr in site_header_rows.items():
         defects = []
         for c in range(13, 21):
-            val = ws.cell(start_r, c).value
+            val = ws.cell(r_hdr, c).value
             if val and str(val).strip():
                 defects.append(str(val).strip())
             else:
                 break
+        site_defects[fty] = defects
 
-        if not defects:
-            continue
+    # 3. Clean and unmerge previous legend cells in rows 45 to 65 across columns K to P
+    legend_merged_to_remove = []
+    for rng in list(ws.merged_cells.ranges):
+        if rng.min_row >= 45 and rng.max_row <= 65 and rng.min_col >= 11 and rng.max_col <= 20:
+            legend_merged_to_remove.append(rng)
+    for rng in legend_merged_to_remove:
+        ws.unmerge_cells(str(rng))
 
-        # Cap at 5 defects to strictly fit within the 5 allocated rows per site
-        defects = defects[:5]
+    for r in range(45, 65):
+        for c in range(11, 21):
+            cell = ws.cell(r, c)
+            cell.value = None
+            cell.fill = no_fill
+            cell.border = Border()
 
-        # Site Header Row (Merged U & V)
-        ws.merge_cells(start_row=start_r, start_column=21, end_row=start_r, end_column=22)
-        c_hdr = ws.cell(start_r, 21, value=f"Site {fty}")
+    # 4. Section Title at Row 46
+    ws.row_dimensions[45].height = 14
+    ws.row_dimensions[46].height = 22
+    ws.row_dimensions[47].height = 8
+
+    title_cell = ws.cell(46, 11, value=f"Defect Color Legend by Factory ({target_month}, 2026)")
+    title_cell.font = Font(name="Century Gothic", size=11, bold=True, color="1F4E78")
+    title_cell.alignment = Alignment(horizontal="left", vertical="center")
+
+    # 5. Render 2x2 Grid:
+    # Row 48: Site VH (K..L) & Site VH2 (N..P)
+    # Row 56: Site JV (K..L) & Site JV2 (N..P)
+    grid_config = {
+        "VH":  {"start_r": 48, "chip_col": 11, "txt_col_start": 12, "txt_col_end": 12, "hdr_start": 11, "hdr_end": 12},
+        "VH2": {"start_r": 48, "chip_col": 14, "txt_col_start": 15, "txt_col_end": 16, "hdr_start": 14, "hdr_end": 16},
+        "JV":  {"start_r": 56, "chip_col": 11, "txt_col_start": 12, "txt_col_end": 12, "hdr_start": 11, "hdr_end": 12},
+        "JV2": {"start_r": 56, "chip_col": 14, "txt_col_start": 15, "txt_col_end": 16, "hdr_start": 14, "hdr_end": 16},
+    }
+
+    for fty, cfg in grid_config.items():
+        start_r = cfg["start_r"]
+        chip_col = cfg["chip_col"]
+        txt_s = cfg["txt_col_start"]
+        txt_e = cfg["txt_col_end"]
+        hdr_s = cfg["hdr_start"]
+        hdr_e = cfg["hdr_end"]
+        defects = site_defects.get(fty, [])
+
+        # Header row
+        ws.row_dimensions[start_r].height = 20
+        if hdr_s != hdr_e:
+            ws.merge_cells(start_row=start_r, start_column=hdr_s, end_row=start_r, end_column=hdr_e)
+        c_hdr = ws.cell(start_r, hdr_s, value=f"Site {fty}")
         c_hdr.fill = fill_hdr
         c_hdr.font = font_hdr
         c_hdr.alignment = Alignment(horizontal="center", vertical="center")
-        c_hdr.border = thin_border
-        ws.cell(start_r, 22).border = thin_border
-        ws.row_dimensions[start_r].height = 20
+        for c in range(hdr_s, hdr_e + 1):
+            ws.cell(start_r, c).border = thin_border
+            ws.cell(start_r, c).fill = fill_hdr
 
-        # Defect Rows (up to 5 rows)
+        # Defect rows
         for i, d_name in enumerate(defects, start=1):
             r = start_r + i
+            ws.row_dimensions[r].height = 18
             hex_val = get_defect_color(d_name, color_map, fallback_cache)
 
-            c_chip = ws.cell(r, 21)
+            # Color chip
+            c_chip = ws.cell(r, chip_col)
             c_chip.fill = PatternFill(start_color=hex_val, end_color=hex_val, fill_type="solid")
             c_chip.border = thin_border
 
-            c_txt = ws.cell(r, 22, value=str(d_name))
+            # Defect text
+            if txt_s != txt_e:
+                ws.merge_cells(start_row=r, start_column=txt_s, end_row=r, end_column=txt_e)
+            c_txt = ws.cell(r, txt_s, value=str(d_name))
             c_txt.font = font_txt
-            c_txt.border = thin_border
             c_txt.alignment = Alignment(horizontal="left", vertical="center")
-            ws.row_dimensions[r].height = 18
+            for c in range(txt_s, txt_e + 1):
+                ws.cell(r, c).border = thin_border
 
-    print("   [+] Populated Defect Color Legend in columns U & V matching process_ftt.py!")
+    print("   [+] Populated Defect Color Legend below Top 5 Defect table (Rows 48 to 62)!")
 
 
 def apply_elegant_borders(ws, target_month="Jul"):
@@ -553,7 +593,7 @@ def apply_elegant_borders(ws, target_month="Jul"):
     - Factory badge cells with soft shading (#F4F6F9) and clean vertical borders
     - Accounting-standard double underline on Grand Total rows
     - Wrap text and optimized row heights for clean readability
-    - Complete cleanup of rows 45+
+    - Defect Matrix borders strictly match each factory's actual columns
     """
     ws.sheet_view.showGridLines = True
     try:
@@ -602,7 +642,7 @@ def apply_elegant_borders(ws, target_month="Jul"):
         ws.row_dimensions[r_hdr].height = 24
         if ws.cell(r_hdr, 1).value is None:
             ws.cell(r_hdr, 1).value = "FTY"
-        if r_hdr == 15 and ws.cell(r_hdr, 2).value is None:
+        if ws.cell(r_hdr, 2).value is None:
             ws.cell(r_hdr, 2).value = label
 
         for c in range(1, 15):
@@ -661,10 +701,24 @@ def apply_elegant_borders(ws, target_month="Jul"):
                 elif r_hdr == 15 and isinstance(cell.value, (int, float)):
                     cell.number_format = "0.00%"
 
+        # Clean Table 3 (HFPA%) future month formulas so they don't show #DIV/0!
+        if r_hdr == 15:
+            for r in range(16, 21):
+                for c in range(3, 15):
+                    col_l = get_column_letter(c)
+                    val = str(ws.cell(r, c).value or "")
+                    if val.startswith("=1-") and not val.startswith("=IF"):
+                        if r < 20:
+                            p_r = r - 14
+                            d_r = r - 7
+                            ws.cell(r, c).value = f'=IF({col_l}{p_r}>0, 1-{col_l}{d_r}/{col_l}{p_r}, "")'
+                        else:
+                            ws.cell(r, c).value = f'=IF({col_l}6>0, 1-{col_l}13/{col_l}6, "")'
+
     # Clear borders on gap rows (Row 7, Row 14)
     for r in [7, 14]:
         ws.row_dimensions[r].height = 14
-        for c in range(1, 20):
+        for c in range(1, 25):
             cell = ws.cell(r, c)
             cell.border = Border()
             cell.fill = PatternFill(fill_type=None)
@@ -715,16 +769,9 @@ def apply_elegant_borders(ws, target_month="Jul"):
             right_b = med_navy if c == 7 else thin_gray
             cell.border = Border(left=left_b, right=right_b, top=med_navy, bottom=med_navy)
 
-        # Dynamically detect last defect column
-        last_def_col = 12
-        for c in range(13, 21):
-            val = ws.cell(r_hdr, c).value
-            if val and str(val).strip():
-                last_def_col = c
-            else:
-                break
-        if last_def_col < 15:
-            last_def_col = 15
+        # Detect last defect column for this specific factory (can be up to 18 or higher)
+        active_def_cols = [c for c in range(13, 21) if ws.cell(r_hdr, c).value and str(ws.cell(r_hdr, c).value).strip()]
+        last_def_col = max(active_def_cols) if active_def_cols else 15
 
         # B. Right Table Header (Cols K to last_def_col)
         if ws.cell(r_hdr, 11).value is None:
@@ -812,7 +859,7 @@ def apply_elegant_borders(ws, target_month="Jul"):
                 right_def = med_navy if c == last_def_col else thin_gray
                 cell_def.border = Border(left=thin_gray, right=right_def, top=thin_gray, bottom=divider_bot)
 
-            # Clear trailing columns beyond last_def_col
+            # Clear trailing columns strictly beyond last_def_col
             for c in range(last_def_col + 1, 21):
                 c_clear = ws.cell(r, c)
                 c_clear.value = None
@@ -823,7 +870,7 @@ def apply_elegant_borders(ws, target_month="Jul"):
     # 4. CLEAN SPACING & CLEAR ROWS 45+
     # -------------------------------------------------------------
     for r in range(21, 45):
-        for c in [1, 8, 9, 18, 19, 20]:
+        for c in [1, 8, 9, 19, 20, 21, 22]:
             cell = ws.cell(r, c)
             cell.border = Border()
             cell.fill = PatternFill(fill_type=None)
@@ -831,11 +878,17 @@ def apply_elegant_borders(ws, target_month="Jul"):
             ws.cell(r, 2).border = Border()
             ws.cell(r, 10).border = Border()
 
-    for r in range(45, 65):
-        ws.row_dimensions[r].height = 15
+    # Unmerge and clear rows 45 to 66 across all data columns before legend is rendered
+    for rng in list(ws.merged_cells.ranges):
+        if rng.min_row >= 45 and rng.max_row <= 66:
+            ws.unmerge_cells(str(rng))
+
+    for r in range(45, 66):
+        ws.row_dimensions[r].height = 16
         for c in range(1, 25):
             cell = ws.cell(r, c)
-            cell.value = None
+            if cell.__class__.__name__ != "MergedCell":
+                cell.value = None
             cell.border = Border()
             cell.fill = PatternFill(fill_type=None)
 

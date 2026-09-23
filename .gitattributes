@@ -1,0 +1,25 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Windows batch files must retain CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Python source files
+*.py text diff=python
+
+# Markdown and text files
+*.md text
+*.txt text
+*.csv text
+
+# Binary Office & Media files (prevent git from corrupting or diffing as text)
+*.xlsx binary
+*.xls binary
+*.pptx binary
+*.ppt binary
+*.pdf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary

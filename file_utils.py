@@ -87,33 +87,64 @@ def promote_fallback_if_writable(filepath: str) -> bool:
 
 
 
-def detect_file_month(filepath: str) -> str:
-    """Detect month abbreviation (e.g. 'Jul', 'Aug') from file contents (Audit Date / InspDate)."""
-    # 1. Read first rows from file to check date columns (highest priority because filenames often contain export dates)
+def detect_file_month_and_year(filepath: str) -> tuple:
+    """
+    Detect month abbreviation (e.g. 'Jun') and 4-digit year (e.g. '2026')
+    from file contents (Audit Date / InspDate) or filename.
+    Returns: (month_str, year_str)
+    """
+    detected_month = None
+    detected_year = None
+
+    # 1. Read first rows from file to check date columns (highest priority)
     try:
         df_sample = pd.read_excel(filepath, nrows=50)
         date_cols = [c for c in df_sample.columns if "date" in str(c).lower()]
         for c in date_cols:
             dates = pd.to_datetime(df_sample[c], errors="coerce").dropna()
             if not dates.empty:
-                return MONTH_MAP[dates.iloc[0].month]
+                first_date = dates.iloc[0]
+                detected_month = MONTH_MAP.get(first_date.month)
+                detected_year = str(first_date.year)
+                if detected_month and detected_year:
+                    return detected_month, detected_year
     except Exception:
         pass
 
     filename = os.path.basename(filepath)
-    # 2. Try month names in filename (e.g. QAStation_Jul_...)
-    for m_num, m_name in MONTH_MAP.items():
-        if re.search(rf"[-_\s]{m_name}[-_\s\.]", filename, re.IGNORECASE):
-            return m_name
 
-    # 3. Fallback to filename regex for YYYY-MM
+    # 2. Try filename regex for YYYY-MM-DD or YYYY_MM_DD
     m = re.search(r"(\d{4})[-_](\d{2})[-_](\d{2})", filename)
     if m:
+        y_val = m.group(1)
         month_num = int(m.group(2))
         if 1 <= month_num <= 12:
-            return MONTH_MAP[month_num]
+            return MONTH_MAP[month_num], y_val
 
-    return "Aug"
+    # 3. Try month names in filename (e.g. QAStation_Jul_...)
+    for m_num, m_name in MONTH_MAP.items():
+        if re.search(rf"[-_\s]{m_name}[-_\s\.]", filename, re.IGNORECASE):
+            detected_month = m_name
+            break
+
+    # Look for 4-digit year in filename
+    y_m = re.search(r"(20\d{2})", filename)
+    if y_m:
+        detected_year = y_m.group(1)
+
+    return (detected_month or "Jun", detected_year or "2026")
+
+
+def detect_file_month(filepath: str) -> str:
+    """Detect month abbreviation (e.g. 'Jun') from file contents or filename."""
+    m, _ = detect_file_month_and_year(filepath)
+    return m
+
+
+def detect_file_year(filepath: str) -> str:
+    """Detect 4-digit year (e.g. '2026') from file contents or filename."""
+    _, y = detect_file_month_and_year(filepath)
+    return y
 
 
 def auto_archive_previous_months(input_dir: str, active_month: str):

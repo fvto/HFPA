@@ -204,7 +204,7 @@ class HFPAGateway:
         deliverables: dict[str, str] = {}
 
         # Master Combined Excel
-        master_path = out_path / "HFPA_FTT_Combined_Master.xlsx"
+        master_path = out_path / f"HFPA_FTT_Combined_Master_{active_month}_{active_year}.xlsx"
         with pd.ExcelWriter(master_path, engine="openpyxl") as writer:
             qa_validated.head(5000).to_excel(writer, sheet_name="HFPA_Quality_Tracking", index=False)
             top5_shoes.to_excel(writer, sheet_name="Top5_Models", index=False)
@@ -213,7 +213,7 @@ class HFPAGateway:
         deliverables["master_combined"] = str(master_path)
 
         # Analysis Report
-        report_path = out_path / "QAStation_HFPA_Analysis_Report.xlsx"
+        report_path = out_path / f"QAStation_HFPA_Analysis_Report_{active_month}_{active_year}.xlsx"
         with pd.ExcelWriter(report_path, engine="openpyxl") as writer:
             top5_shoes.to_excel(writer, sheet_name="Top5_Shoes", index=False)
             p2_df.to_excel(writer, sheet_name="Pivot2_Top3_Defects", index=False)
@@ -221,20 +221,20 @@ class HFPAGateway:
         deliverables["analysis_report"] = str(report_path)
 
         # Audit Trail Log
-        audit_csv = logs_dir / "reconciliation_audit_trail.csv"
+        audit_csv = logs_dir / f"reconciliation_audit_trail_{active_month}_{active_year}.csv"
         diff_records = qa_validated[qa_validated["Validation_Status"] == "Different_Count"]
         diff_records.to_csv(audit_csv, index=False)
         deliverables["audit_trail"] = str(audit_csv)
 
         # 8. Optional Database & Presentation Population
-        updated_excel = out_path / "HFPA_Template_Updated.xlsx"
+        updated_excel = out_path / f"HFPA_Template_Updated_{active_month}_{active_year}.xlsx"
         template_excel = tmpl_path / "HFPA_Template.xlsx"
         if generate_database and template_excel.exists():
             shutil.copy2(template_excel, updated_excel)
             self._populate_database(updated_excel, hfpa_combined, active_month, p2_df)
             deliverables["database_updated"] = str(updated_excel)
 
-        updated_pptx = out_path / "HFPA_Performance_Report.pptx"
+        updated_pptx = out_path / f"HFPA_Performance_Report_{active_month}_{active_year}.pptx"
         template_pptx = tmpl_path / "HFPA_Template.pptx"
         if generate_presentation and template_pptx.exists():
             shutil.copy2(template_pptx, updated_pptx)
@@ -323,11 +323,11 @@ class FakeHFPAGateway:
             "target_month": month,
             "summary": f"[Mock] Đã hoàn tất đối soát và tạo báo cáo Tháng {month}.",
             "deliverables": {
-                "master_combined": f"{out_base}/HFPA_FTT_Combined_Master.xlsx",
-                "analysis_report": f"{out_base}/QAStation_HFPA_Analysis_Report.xlsx",
-                "audit_trail": f"{out_base}/../logs/reconciliation_audit_trail.csv",
-                "database_updated": f"{out_base}/HFPA_Template_Updated.xlsx",
-                "presentation": f"{out_base}/HFPA_Performance_Report.pptx",
+                "master_combined": f"{out_base}/HFPA_FTT_Combined_Master_{month}_2026.xlsx",
+                "analysis_report": f"{out_base}/QAStation_HFPA_Analysis_Report_{month}_2026.xlsx",
+                "audit_trail": f"{out_base}/../logs/reconciliation_audit_trail_{month}_2026.csv",
+                "database_updated": f"{out_base}/HFPA_Template_Updated_{month}_2026.xlsx",
+                "presentation": f"{out_base}/HFPA_Performance_Report_{month}_2026.pptx",
             },
             "metrics": {
                 "total_production": 602105,

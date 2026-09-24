@@ -17,7 +17,7 @@ from collections import defaultdict
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 
-from file_utils import ensure_file_writable, detect_file_month
+from file_utils import ensure_file_writable, detect_file_month, detect_file_month_and_year
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATABASE_TEMPLATE = os.path.join(BASE_DIR, "Database", "HFPA_Template.xlsx")
@@ -41,13 +41,20 @@ def detect_month_from_data(hfpa_df: pd.DataFrame) -> str:
     return "Aug"
 
 
-def load_top3_defects_from_reports():
+def load_top3_defects_from_reports(target_month=None, target_year=None):
     """Load per-model top 3 defects from QAStation analysis reports."""
     records = defaultdict(lambda: defaultdict(dict))
-    report_candidates = [
-        os.path.join(OUTPUT_DIR, "QAStation_HFPA_Analysis_Report.xlsx"),
-        os.path.join(OUTPUT_DIR, "QAStation_HFPA_Analysis_Report_New.xlsx"),
-    ]
+    report_candidates = []
+    if target_month and target_year:
+        report_candidates.append(os.path.join(OUTPUT_DIR, f"QAStation_HFPA_Analysis_Report_{target_month}_{target_year}.xlsx"))
+        report_candidates.append(os.path.join(OUTPUT_DIR, f"QAStation_HFPA_Analysis_Report_{target_month}_{target_year}_New.xlsx"))
+    
+    # Add any matching analysis report in Output/ sorted by modification time (newest first)
+    matched = sorted(glob.glob(os.path.join(OUTPUT_DIR, "*QAStation_HFPA_Analysis_Report*.xlsx")), key=os.path.getmtime, reverse=True)
+    for m in matched:
+        if m not in report_candidates:
+            report_candidates.append(m)
+
     for rpath in report_candidates:
         if os.path.exists(rpath):
             try:
@@ -72,7 +79,7 @@ def load_top3_defects_from_reports():
     return records
 
 
-def populate_hfpa_database(target_month=None, p2_df=None):
+def populate_hfpa_database(target_month=None, target_year=None, p2_df=None):
     """
     Populate HFPA sheet in database template.
     Strictly preserves formulas in rows 6, 13, 16-20, and Top 5 DR% columns.
@@ -81,8 +88,28 @@ def populate_hfpa_database(target_month=None, p2_df=None):
         print(f"[-] Template not found at: {DATABASE_TEMPLATE}")
         return False
 
+    # Auto-detect target month and year if not specified
+    if not target_month or not target_year:
+        sample_files = glob.glob(os.path.join(INPUT_HFPA_DIR, "*.xlsx")) + glob.glob(os.path.join(INPUT_FTT_DIR, "*.xlsx"))
+        if sample_files:
+            dm, dy = detect_file_month_and_year(sample_files[0])
+            target_month = target_month or dm
+            target_year = target_year or dy
+    target_month = target_month or "Jun"
+    target_year = target_year or "2026"
+
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    target_output_path = ensure_file_writable(OUTPUT_DATABASE, "Template đầu ra (Output/HFPA_Template_Updated.xlsx)")
+    target_output_filename = f"HFPA_Template_Updated_{target_month}_{target_year}.xlsx"
+    target_output_path = os.path.join(OUTPUT_DIR, target_output_filename)
+    target_output_path = ensure_file_writable(target_output_path, f"Template đầu ra (Output/{target_output_filename})")
+
+    # Remove legacy un-suffixed file if present
+    legacy_excel = os.path.join(OUTPUT_DIR, "HFPA_Template_Updated.xlsx")
+    if os.path.exists(legacy_excel) and legacy_excel != target_output_path:
+        try:
+            os.remove(legacy_excel)
+        except Exception:
+            pass
 
     shutil.copy2(DATABASE_TEMPLATE, target_output_path)
     print(f"[+] Loaded database template into: {target_output_path}")
@@ -421,14 +448,14 @@ def populate_hfpa_database(target_month=None, p2_df=None):
     print("   [+] Applied professional corporate borders and styling to Sheet HFPA!")
 
     # Populate Defect Color Legend in columns U & V matching process_ftt.py & user's reference
-    populate_custom_defect_color_legend(ws, target_month=target_month)
+    populate_custom_defect_color_legend(ws, target_month=target_month, target_year=target_year)
 
     # Purge any redundant ColorMap_ sheets to keep workbook clean and optimal
     for s_name in list(wb.sheetnames):
         if s_name.startswith("ColorMap_"):
             del wb[s_name]
 
-    target_output_path = ensure_file_writable(target_output_path, "File kết quả (Output/HFPA_Template_Updated.xlsx)")
+    target_output_path = ensure_file_writable(target_output_path, f"File kết quả (Output/{target_output_filename})")
     wb.save(target_output_path)
     wb.close()
 
@@ -441,7 +468,7 @@ def populate_hfpa_database(target_month=None, p2_df=None):
         print(f"[-] Notice: Could not overwrite master template (may be open in Office): {e}")
 
     # Remove temporary fallback file if target_output_path is active
-    fallback_new = os.path.join(OUTPUT_DIR, "HFPA_Template_Updated_New.xlsx")
+    fallback_new = os.path.join(OUTPUT_DIR, f"HFPA_Template_Updated_{target_month}_{target_year}_New.xlsx")
     if os.path.exists(fallback_new) and target_output_path != fallback_new:
         try:
             os.remove(fallback_new)
@@ -452,7 +479,7 @@ def populate_hfpa_database(target_month=None, p2_df=None):
     return True
 
 
-def populate_custom_defect_color_legend(ws, target_month="Jul"):
+def populate_custom_defect_color_legend(ws, target_month="Jul", target_year="2026"):
     """
     Populate custom defect color key placed BELOW the Top 5 Defect table (Rows 48 to 62).
     Cleanly removes any old legend from columns U and V (Rows 21 to 46).
@@ -525,7 +552,7 @@ def populate_custom_defect_color_legend(ws, target_month="Jul"):
     ws.row_dimensions[46].height = 22
     ws.row_dimensions[47].height = 8
 
-    title_cell = ws.cell(46, 11, value=f"Defect Color Legend by Factory ({target_month}, 2026)")
+    title_cell = ws.cell(46, 11, value=f"Defect Color Legend by Factory ({target_month}, {target_year})")
     title_cell.font = Font(name="Century Gothic", size=11, bold=True, color="1F4E78")
     title_cell.alignment = Alignment(horizontal="left", vertical="center")
 

@@ -27,7 +27,7 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
-from file_utils import ensure_file_writable, auto_archive_previous_months, detect_file_month
+from file_utils import ensure_file_writable, auto_archive_previous_months, detect_file_month, detect_file_month_and_year
 
 # Paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -501,26 +501,27 @@ def style_excel_sheet(ws, title: str):
 
 def export_deliverables(qa_validated: pd.DataFrame, hfpa_combined: pd.DataFrame,
                         lot_comparison: pd.DataFrame, p1_df: pd.DataFrame,
-                        all_top5: pd.DataFrame, p2_df: pd.DataFrame):
+                        all_top5: pd.DataFrame, p2_df: pd.DataFrame,
+                        active_month: str = "Jun", active_year: str = "2026"):
     """
-    Save 1 single unified master combined workbook (Output/HFPA_FTT_Combined_Master.xlsx)
+    Save 1 single unified master combined workbook (Output/HFPA_FTT_Combined_Master_<Month>_<Year>.xlsx)
     and the executive analysis report.
     Adheres to SOP and QAStation_Tool_Agent_Spec.md:
     - Merges Quality Tracking and Mes410 into 1 combine file (no split files).
-    - Writes audit trail log to logs/reconciliation_audit_trail.csv.
+    - Writes audit trail log to logs/reconciliation_audit_trail_<Month>_<Year>.csv.
     """
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     logs_dir = os.path.join(BASE_DIR, "logs")
     os.makedirs(logs_dir, exist_ok=True)
 
-    master_combined_path = os.path.join(OUTPUT_DIR, "HFPA_FTT_Combined_Master.xlsx")
-    report_out_path = os.path.join(OUTPUT_DIR, "QAStation_HFPA_Analysis_Report.xlsx")
+    master_combined_path = os.path.join(OUTPUT_DIR, f"HFPA_FTT_Combined_Master_{active_month}_{active_year}.xlsx")
+    report_out_path = os.path.join(OUTPUT_DIR, f"QAStation_HFPA_Analysis_Report_{active_month}_{active_year}.xlsx")
 
-    ensure_file_writable(master_combined_path, "Master Combined (Output/HFPA_FTT_Combined_Master.xlsx)")
-    ensure_file_writable(report_out_path, "Executive Report (Output/QAStation_HFPA_Analysis_Report.xlsx)")
+    ensure_file_writable(master_combined_path, f"Master Combined (Output/HFPA_FTT_Combined_Master_{active_month}_{active_year}.xlsx)")
+    ensure_file_writable(report_out_path, f"Executive Report (Output/QAStation_HFPA_Analysis_Report_{active_month}_{active_year}.xlsx)")
 
-    # Remove legacy separate combine files if they exist
-    for legacy_f in ["FTT_Combined_Validated.xlsx", "HFPA_Combined.xlsx"]:
+    # Remove legacy separate or un-suffixed combine files if they exist
+    for legacy_f in ["FTT_Combined_Validated.xlsx", "HFPA_Combined.xlsx", "HFPA_FTT_Combined_Master.xlsx", "QAStation_HFPA_Analysis_Report.xlsx"]:
         legacy_path = os.path.join(OUTPUT_DIR, legacy_f)
         if os.path.exists(legacy_path):
             try:
@@ -624,7 +625,7 @@ def export_deliverables(qa_validated: pd.DataFrame, hfpa_combined: pd.DataFrame,
     wb.close()
 
     # 3. Create Audit Trail Log as per QAStation_Tool_Agent_Spec.md Section 12
-    audit_trail_path = os.path.join(logs_dir, "reconciliation_audit_trail.csv")
+    audit_trail_path = os.path.join(logs_dir, f"reconciliation_audit_trail_{active_month}_{active_year}.csv")
     audit_records = []
     # Identify records where values were adjusted
     adjusted_records = qa_validated[qa_validated["Validation_Status"] == "Different_Count"]
@@ -655,17 +656,17 @@ def main():
     print("   QAStation & HFPA Data Processing Pipeline")
     print("=" * 65)
 
-    # Detect active month and archive previous months
+    # Detect active month and year and archive previous months
     ftt_sample_files = glob.glob(os.path.join(INPUT_FTT_DIR, "*.xlsx")) + glob.glob(os.path.join(INPUT_FTT_DIR, "*.xls"))
     hfpa_sample_files = glob.glob(os.path.join(INPUT_HFPA_DIR, "*.xlsx")) + glob.glob(os.path.join(INPUT_HFPA_DIR, "*.xls"))
 
-    active_month = "Aug"
+    active_month, active_year = "Jun", "2026"
     if ftt_sample_files:
-        active_month = detect_file_month(ftt_sample_files[0])
+        active_month, active_year = detect_file_month_and_year(ftt_sample_files[0])
     elif hfpa_sample_files:
-        active_month = detect_file_month(hfpa_sample_files[0])
+        active_month, active_year = detect_file_month_and_year(hfpa_sample_files[0])
 
-    print(f"\n[*] XAC NHAN DU LIEU DAU VAO: THANG {active_month.upper()} ({active_month})")
+    print(f"\n[*] XAC NHAN DU LIEU DAU VAO: THANG {active_month.upper()} NAM {active_year}")
     print(f"[*] Dang tu dong luu tru cac file thang khac vao thu muc Archive/...")
     auto_archive_previous_months(INPUT_FTT_DIR, active_month)
     auto_archive_previous_months(INPUT_HFPA_DIR, active_month)
@@ -677,13 +678,13 @@ def main():
     p1_df, all_top5, top5_dict = generate_pivot1_and_top5(qa_validated)
     p2_df = generate_pivot2_top_defects(qa_validated, top5_dict)
 
-    export_deliverables(qa_validated, hfpa_clean, lot_comparison, p1_df, all_top5, p2_df)
+    export_deliverables(qa_validated, hfpa_clean, lot_comparison, p1_df, all_top5, p2_df, active_month=active_month, active_year=active_year)
 
     # Populate Database/HFPA_Template.xlsx automatically
-    print(f"\n[6/7] Populating Database Template (HFPA_Template.xlsx) for Month: {active_month}...")
+    print(f"\n[6/7] Populating Database Template (HFPA_Template.xlsx) for Month: {active_month} {active_year}...")
     try:
         from populate_database import populate_hfpa_database
-        populate_hfpa_database(target_month=active_month, p2_df=p2_df)
+        populate_hfpa_database(target_month=active_month, target_year=active_year, p2_df=p2_df)
     except Exception as e:
         print(f"[-] Warning: Failed to populate database template: {e}")
 
@@ -691,12 +692,12 @@ def main():
     print(f"\n[7/7] Generating PowerPoint Performance Presentation (HFPA_Template.pptx)...")
     try:
         from process_pptx import generate_hfpa_presentation
-        generate_hfpa_presentation(target_month=active_month)
+        generate_hfpa_presentation(target_month=active_month, target_year=active_year)
     except Exception as e:
         print(f"[-] Warning: Failed to generate PowerPoint presentation: {e}")
 
     print("\n" + "=" * 65)
-    print(f"   Hoan tat xu ly du lieu Thang {active_month.upper()}! Tat ca bao cao da san sang trong Output/")
+    print(f"   Hoan tat xu ly du lieu Thang {active_month.upper()} {active_year}! Tat ca bao cao da san sang trong Output/")
     print("=" * 65)
 
 

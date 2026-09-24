@@ -14,6 +14,7 @@ Implements:
 """
 
 import os
+import glob
 import re
 import sys
 import shutil
@@ -28,7 +29,7 @@ from pptx.oxml import parse_xml
 from openpyxl.utils import get_column_letter
 from PIL import Image, ImageDraw, ImageFont
 
-from file_utils import ensure_file_writable, detect_file_month
+from file_utils import ensure_file_writable, detect_file_month, detect_file_month_and_year
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
@@ -208,20 +209,41 @@ def get_defect_color(defect_name, color_map, fallback_cache):
 # ======================================================================
 # 2. DATA EXTRACTION FROM OUTPUT/
 # ======================================================================
-def extract_pipeline_data(target_month=None):
+def extract_pipeline_data(target_month=None, target_year=None):
     """
     Extract all required data from Output/ workbooks.
     """
-    fallback_excel = os.path.join(OUTPUT_DIR, "HFPA_Template_Updated_New.xlsx")
-    if os.path.exists(fallback_excel):
-        excel_path = fallback_excel
-    elif os.path.exists(UPDATED_EXCEL):
-        excel_path = UPDATED_EXCEL
-    else:
-        excel_path = os.path.join(DATABASE_DIR, "HFPA_Template.xlsx")
-    if not os.path.exists(excel_path):
-        raise FileNotFoundError(f"Source Excel not found: {excel_path}")
+    if not target_year:
+        sample_files = glob.glob(os.path.join(BASE_DIR, "Input", "HFPA", "*.xlsx")) + glob.glob(os.path.join(BASE_DIR, "Input", "FTT", "*.xlsx"))
+        if sample_files:
+            dm, dy = detect_file_month_and_year(sample_files[0])
+            target_year = dy
+            if not target_month:
+                target_month = dm
+    target_year = target_year or "2026"
 
+    excel_candidates = []
+    if target_month and target_year:
+        excel_candidates.append(os.path.join(OUTPUT_DIR, f"HFPA_Template_Updated_{target_month}_{target_year}.xlsx"))
+        excel_candidates.append(os.path.join(OUTPUT_DIR, f"HFPA_Template_Updated_{target_month}_{target_year}_New.xlsx"))
+
+    # Also check any matching updated excel files in Output/ sorted by modification time
+    for p in sorted(glob.glob(os.path.join(OUTPUT_DIR, "*HFPA_Template_Updated*.xlsx")), key=os.path.getmtime, reverse=True):
+        if p not in excel_candidates:
+            excel_candidates.append(p)
+    excel_candidates.append(UPDATED_EXCEL)
+    excel_candidates.append(os.path.join(OUTPUT_DIR, "HFPA_Template_Updated_New.xlsx"))
+    excel_candidates.append(os.path.join(DATABASE_DIR, "HFPA_Template.xlsx"))
+
+    excel_path = None
+    for cand in excel_candidates:
+        if os.path.exists(cand):
+            excel_path = cand
+            break
+    if not excel_path:
+        raise FileNotFoundError(f"Source Excel not found in candidates: {excel_candidates}")
+
+    target_excel_name = os.path.basename(excel_path)
     wb = openpyxl.load_workbook(excel_path, data_only=True)
     if "HFPA" not in wb.sheetnames:
         raise ValueError(f"Sheet 'HFPA' not found in {excel_path}")
@@ -257,7 +279,6 @@ def extract_pipeline_data(target_month=None):
         target_idx = MONTH_NAMES.index(target_month)
         active_months = [m for m in active_months if MONTH_NAMES.index(m) <= target_idx]
 
-    target_year = "2026"
     print(f"   [+] Presentation Target Month: {target_month} {target_year} (Active range: {active_months[0]}..{active_months[-1]})")
 
     # Monthly production & defect metrics for Chart 1
@@ -376,6 +397,7 @@ def extract_pipeline_data(target_month=None):
     return {
         "target_month": target_month,
         "target_year": target_year,
+        "target_excel_name": target_excel_name,
         "active_months": active_months,
         "monthly_metrics": monthly_metrics,
         "site_summaries": site_summaries,
@@ -404,6 +426,10 @@ def update_slide_metrics_and_links(slide, data):
     site_sums = data["site_summaries"]
     g_total = data["grand_total"]
 
+    analysis_excel_name = f"QAStation_HFPA_Analysis_Report_{target_month}_{target_year}.xlsx"
+    master_excel_name = f"HFPA_FTT_Combined_Master_{target_month}_{target_year}.xlsx"
+    updated_excel_name = data.get("target_excel_name") or f"HFPA_Template_Updated_{target_month}_{target_year}.xlsx"
+
     for s in slide.shapes:
         # 1. Title: Rectangle 100
         if s.name == "Rectangle 100":
@@ -422,12 +448,12 @@ def update_slide_metrics_and_links(slide, data):
 
         # 2. Hyperlinks on navigation buttons
         if s.name == "Rectangle 104":  # 'Analysis by Site'
-            s.click_action.hyperlink.address = r"../Output/QAStation_HFPA_Analysis_Report.xlsx"
-            print("   [+] Set hyperlink: Rectangle 104 -> Output/QAStation_HFPA_Analysis_Report.xlsx")
+            s.click_action.hyperlink.address = rf"../Output/{analysis_excel_name}"
+            print(f"   [+] Set hyperlink: Rectangle 104 -> Output/{analysis_excel_name}")
 
         if s.name in ("Rectangle 183", "Rectangle 184"):  # 'HFPA' / 'High Frequency Product Audit'
-            s.click_action.hyperlink.address = r"../Output/HFPA_FTT_Combined_Master.xlsx"
-            print(f"   [+] Set hyperlink: {s.name} -> Output/HFPA_FTT_Combined_Master.xlsx")
+            s.click_action.hyperlink.address = rf"../Output/{master_excel_name}"
+            print(f"   [+] Set hyperlink: {s.name} -> Output/{master_excel_name}")
 
         # 3. Update Group 14 (Total pair produced)
         if s.name == "组合 14":
@@ -448,7 +474,7 @@ def update_slide_metrics_and_links(slide, data):
                     r1 = p1.add_run()
                     r1.text = f"~{round(g_total['prod'] / 1000):,}K"
                     set_run_font(r1, name="Calibri", size_pt=16, bold=True, color_rgb=(255, 255, 255))
-                    sub.click_action.hyperlink.address = r"../Output/HFPA_Template_Updated.xlsx"
+                    sub.click_action.hyperlink.address = rf"../Output/{updated_excel_name}"
 
                 if sub.shape_type == pptx.enum.shapes.MSO_SHAPE_TYPE.GROUP:
                     factories_prod = {
@@ -489,7 +515,7 @@ def update_slide_metrics_and_links(slide, data):
                     r1 = p1.add_run()
                     r1.text = f"~{round(g_total['def'] / 1000):,}K"
                     set_run_font(r1, name="Calibri", size_pt=16, bold=True, color_rgb=(255, 255, 255))
-                    sub.click_action.hyperlink.address = r"../Output/HFPA_Template_Updated.xlsx"
+                    sub.click_action.hyperlink.address = rf"../Output/{updated_excel_name}"
 
                 if sub.shape_type == pptx.enum.shapes.MSO_SHAPE_TYPE.GROUP:
                     factories_def = {
@@ -522,7 +548,7 @@ def update_slide_metrics_and_links(slide, data):
                 r0 = p0.add_run()
                 r0.text = fty
                 set_run_font(r0, name="Calibri", size_pt=12, bold=True, color_rgb=(0, 0, 0))
-                s.click_action.hyperlink.address = r"../Output/HFPA_Template_Updated.xlsx"
+                s.click_action.hyperlink.address = rf"../Output/{updated_excel_name}"
 
             elif s.name == cfg["dr_rect"]:
                 dr_pct = site_sums[fty]["dr"]
@@ -545,7 +571,7 @@ def update_slide_metrics_and_links(slide, data):
                 r1 = p1.add_run()
                 r1.text = f"{dr_pct:.2%}"
                 set_run_font(r1, name="Calibri", size_pt=9.5, bold=True, color_rgb=(0, 0, 0))
-                s.click_action.hyperlink.address = r"../Output/QAStation_HFPA_Analysis_Report.xlsx"
+                s.click_action.hyperlink.address = rf"../Output/{analysis_excel_name}"
 
         # 6. Side note: Rectangle 55
         if s.name == "Rectangle 55":
@@ -692,16 +718,16 @@ def create_defect_color_legend_table(slide, data, color_map, fallback_cache):
 # ======================================================================
 # 5. XML CHART BUILDERS & UPDATERS (WITH ACCURATE FONT CONTROLS)
 # ======================================================================
-def update_chart_relationships(chart_shape):
-    """Update oleObject relationship rId1 to point to Output/HFPA_Template_Updated.xlsx."""
+def update_chart_relationships(chart_shape, target_excel_name="HFPA_Template_Updated.xlsx"):
+    """Update oleObject relationship rId1 to point to Output/<target_excel_name>."""
     part = chart_shape.chart.part
     if "rId1" in part.rels:
         rel = part.rels["rId1"]
         if rel.is_external:
-            rel._target = r"../Output/HFPA_Template_Updated.xlsx"
+            rel._target = rf"../Output/{target_excel_name}"
 
 
-def update_hfpa_analysis_chart(chart_shape, active_months, metrics_dict, prod_row, def_row, hfpa_row):
+def update_hfpa_analysis_chart(chart_shape, active_months, metrics_dict, prod_row, def_row, hfpa_row, target_excel_name="HFPA_Template_Updated.xlsx"):
     """
     Update Column 1: 'HFPA Analysis' Combination Chart.
     Plot 0: BarChart (Total pair produced & Defect)
@@ -812,10 +838,10 @@ def update_hfpa_analysis_chart(chart_shape, active_months, metrics_dict, prod_ro
                 dlbl_sz="750",
             )
 
-    update_chart_relationships(chart_shape)
+    update_chart_relationships(chart_shape, target_excel_name=target_excel_name)
 
 
-def update_top5_models_chart(chart_shape, top5_list, start_row, end_row):
+def update_top5_models_chart(chart_shape, top5_list, start_row, end_row, target_excel_name="HFPA_Template_Updated.xlsx"):
     """
     Update Column 2: 'Top 5 models' Clustered Column Chart.
     Categories: Top 5 models (6pt font)
@@ -914,10 +940,10 @@ def update_top5_models_chart(chart_shape, top5_list, start_row, end_row):
             if p is not None and p.find(qn('a:pPr')) is not None and p.find(qn('a:pPr')).find(qn('a:defRPr')) is not None:
                 p.find(qn('a:pPr')).find(qn('a:defRPr')).set('sz', '600')
 
-    update_chart_relationships(chart_shape)
+    update_chart_relationships(chart_shape, target_excel_name=target_excel_name)
 
 
-def update_top_defects_chart(chart_shape, defect_matrix, color_map, fallback_cache):
+def update_top_defects_chart(chart_shape, defect_matrix, color_map, fallback_cache, target_excel_name="HFPA_Template_Updated.xlsx"):
     """
     Update Column 3: 'Top defect of top models' Stacked Column Chart.
     Strictly adheres to process_ftt.py ranking and Color_template.xlsx HEX styling.
@@ -1033,13 +1059,13 @@ def update_top_defects_chart(chart_shape, defect_matrix, color_map, fallback_cac
             if p is not None and p.find(qn('a:pPr')) is not None and p.find(qn('a:pPr')).find(qn('a:defRPr')) is not None:
                 p.find(qn('a:pPr')).find(qn('a:defRPr')).set('sz', '600')
 
-    update_chart_relationships(chart_shape)
+    update_chart_relationships(chart_shape, target_excel_name=target_excel_name)
 
 
 # ======================================================================
 # 6. MAIN PRESENTATION GENERATION WORKFLOW
 # ======================================================================
-def generate_hfpa_presentation(target_month=None, template_path=TEMPLATE_PPTX, output_path=OUTPUT_PPTX):
+def generate_hfpa_presentation(target_month=None, target_year=None, template_path=TEMPLATE_PPTX, output_path=None):
     """
     Main entry point: Read data from Output/, map into PPTX presentation,
     re-render all 12 charts, generate native Defect Color Legend table,
@@ -1058,8 +1084,13 @@ def generate_hfpa_presentation(target_month=None, template_path=TEMPLATE_PPTX, o
 
     # 1. Extract data from Output/
     print("\n[1/6] Extracting quality & defect metrics from Output/...")
-    data = extract_pipeline_data(target_month=target_month)
+    data = extract_pipeline_data(target_month=target_month, target_year=target_year)
     month = data["target_month"]
+    year = data["target_year"]
+    target_excel_name = data.get("target_excel_name") or f"HFPA_Template_Updated_{month}_{year}.xlsx"
+
+    if not output_path:
+        output_path = os.path.join(OUTPUT_DIR, f"HFPA_Performance_Report_{month}_{year}.pptx")
 
     # 2. Load defect colors
     print("\n[2/6] Loading defect color palette from Color_template.xlsx...")
@@ -1104,6 +1135,7 @@ def generate_hfpa_presentation(target_month=None, template_path=TEMPLATE_PPTX, o
                 cfg["excel_rows"]["prod"],
                 cfg["excel_rows"]["defect"],
                 cfg["excel_rows"]["hfpa"],
+                target_excel_name=target_excel_name,
             )
             print(f"   │  ├─ Updated {c_analysis_name} ('HFPA Analysis' Combo Chart)")
 
@@ -1116,6 +1148,7 @@ def generate_hfpa_presentation(target_month=None, template_path=TEMPLATE_PPTX, o
                 data["top5_data"][fty],
                 cfg["excel_rows"]["top5_start"],
                 cfg["excel_rows"]["top5_end"],
+                target_excel_name=target_excel_name,
             )
             print(f"   │  ├─ Updated {c_top5_name} ('Top 5 models' Clustered Column)")
 
@@ -1128,28 +1161,38 @@ def generate_hfpa_presentation(target_month=None, template_path=TEMPLATE_PPTX, o
                 data["top_defects_matrix"][fty],
                 color_map,
                 fallback_cache,
+                target_excel_name=target_excel_name,
             )
             def_count = len(data["top_defects_matrix"][fty]["defects"])
             print(f"   │  └─ Updated {c_top_def_name} ('Top defect of top models' {def_count} defect series)")
 
     # 7. Save presentation to Database/ and Output/
-    target_output = ensure_file_writable(output_path, "Báo cáo PowerPoint đầu ra (Output/HFPA_Performance_Report.pptx)")
+    target_output = ensure_file_writable(output_path, f"Báo cáo PowerPoint đầu ra ({os.path.basename(output_path)})")
     prs.save(target_output)
     print(f"\n[+] Successfully saved presentation to Output: {target_output}")
+
+    # Remove legacy un-suffixed presentation if present
+    legacy_pptx = os.path.join(OUTPUT_DIR, "HFPA_Performance_Report.pptx")
+    if os.path.exists(legacy_pptx) and legacy_pptx != target_output:
+        try:
+            os.remove(legacy_pptx)
+        except Exception:
+            pass
 
     target_database = ensure_file_writable(template_path, "Template PowerPoint gốc (Database/HFPA_Template.pptx)", max_retries=3)
     prs.save(target_database)
     print(f"[+] Master presentation template synchronized: {target_database}")
 
     print("\n" + "=" * 65)
-    print(f"   COMPLETED! HFPA PowerPoint Report generated for Month: {month.upper()}")
+    print(f"   COMPLETED! HFPA PowerPoint Report generated for Month: {month.upper()} {year}")
     print("=" * 65 + "\n")
     return True
 
 
 def main():
     target_month = sys.argv[1] if len(sys.argv) > 1 else None
-    generate_hfpa_presentation(target_month=target_month)
+    target_year = sys.argv[2] if len(sys.argv) > 2 else None
+    generate_hfpa_presentation(target_month=target_month, target_year=target_year)
 
 
 if __name__ == "__main__":

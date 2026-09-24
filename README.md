@@ -85,12 +85,14 @@ python process_qastation.py
 
 ## 4. Các file kết quả đầu ra (`Output/` & `logs/`)
 
+*Tất cả các file đầu ra trong `Output/` và `logs/` đều được tự động gắn kèm **tháng và năm** từ dữ liệu đầu vào (ví dụ: `_Jun_2026`).*
+
 | Tên file | Vị trí | Mô tả |
 | :--- | :--- | :--- |
-| **`HFPA_Performance_Report.pptx`** | `Output/` | **Báo cáo thuyết trình PowerPoint hoàn chỉnh**: Tự động điền số liệu, 12 biểu đồ chuẩn màu sắc và tích hợp hyperlinks tương tác. |
-| **`HFPA_FTT_Combined_Master.xlsx`** | `Output/` | **1 file combine tổng duy nhất** chứa toàn bộ dữ liệu gồm 6 sheet: `HFPA_Quality_Tracking`, `HFPA_Mes410`, `Pivot1_Validation`, `Top5_Models`, `Top3_Defects`, `Lot_Defect_Variance`. |
-| **`HFPA_Template_Updated.xlsx`** | `Output/` | File cơ sở dữ liệu mẫu đã được cập nhật số liệu mới của tháng, giữ nguyên 100% công thức. |
-| **`HFPA_Template.xlsx`** | `Database/` | File master template gốc cũng được tự động đồng bộ số liệu mới. |
+| **`HFPA_Performance_Report_<Month>_<Year>.pptx`** | `Output/` | **Báo cáo thuyết trình PowerPoint hoàn chỉnh**: Tự động điền số liệu, 12 biểu đồ chuẩn màu sắc và tích hợp hyperlinks tương tác trỏ chính xác đến các file cùng tháng. |
+| **`HFPA_FTT_Combined_Master_<Month>_<Year>.xlsx`** | `Output/` | **1 file combine tổng duy nhất** chứa toàn bộ dữ liệu gồm 6 sheet: `HFPA_Quality_Tracking`, `HFPA_Mes410`, `Pivot1_Validation`, `Top5_Models`, `Top3_Defects`, `Lot_Defect_Variance`. |
+| **`HFPA_Template_Updated_<Month>_<Year>.xlsx`** | `Output/` | File cơ sở dữ liệu mẫu đã được cập nhật số liệu mới của tháng, giữ nguyên 100% công thức. |
+| **`QAStation_HFPA_Analysis_Report_<Month>_<Year>.xlsx`** | `Output/` | Báo cáo phân tích chất lượng trực quan chuyên sâu kèm mã màu chip lỗi. |
+| **`HFPA_Template.xlsx`** | `Database/` | File master template gốc cũng được tự động đồng bộ số liệu mới nhất. |
 | **`HFPA_Template.pptx`** | `Database/` | File master template PowerPoint gốc được cập nhật đồng bộ. |
-| **`QAStation_HFPA_Analysis_Report.xlsx`** | `Output/` | Báo cáo phân tích chất lượng trực quan chuyên sâu kèm mã màu chip lỗi. |
-| **`reconciliation_audit_trail.csv`** | `logs/` | Bảng truy vết toàn bộ các lot có sự sai lệch được hiệu chỉnh từ QAStation sang Mes410. |
+| **`reconciliation_audit_trail_<Month>_<Year>.csv`** | `logs/` | Bảng truy vết toàn bộ các lot có sự sai lệch được hiệu chỉnh từ QAStation sang Mes410. |

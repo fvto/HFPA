@@ -335,15 +335,27 @@ def populate_hfpa_database(target_month=None, target_year=None, p2_df=None):
         top5_series = df.groupby("Model 2")[def_col].sum().sort_values(ascending=False).head(5)
         top5_models = top5_series.index.tolist()
 
-        # If records for this factory not found, fallback to computing top 3 per model directly from df
-        if fty not in records or not records[fty]:
-            for m in top5_models:
-                m_df = df[df["Model 2"] == m]
-                tot_issues = m_df[defect_cols].sum().sum()
-                top3_s = m_df[defect_cols].sum().sort_values(ascending=False).head(3)
-                for d, cnt in top3_s.items():
-                    if cnt > 0 and tot_issues > 0:
-                        records[fty][m][d] = round(cnt / tot_issues, 6)
+        # Ensure every model in top5_models has defect data (fuzzy matching + fallback per model)
+        for m in top5_models:
+            m_clean = str(m).strip()
+            if m_clean not in records[fty] or not records[fty][m_clean]:
+                # Try finding in records[fty] using normalized name matching
+                found_match = False
+                m_norm = re.sub(r"[\s_\-]+", "", m_clean.lower())
+                for rec_m in list(records[fty].keys()):
+                    if re.sub(r"[\s_\-]+", "", str(rec_m).lower()) == m_norm:
+                        records[fty][m_clean] = records[fty][rec_m]
+                        found_match = True
+                        break
+                
+                # If still not found, compute top 3 defects directly from HFPA df
+                if not found_match or not records[fty][m_clean]:
+                    m_df = df[df["Model 2"] == m]
+                    tot_issues = m_df[defect_cols].sum().sum()
+                    top3_s = m_df[defect_cols].sum().sort_values(ascending=False).head(3)
+                    for d, cnt in top3_s.items():
+                        if cnt > 0 and tot_issues > 0:
+                            records[fty][m_clean][d] = round(cnt / tot_issues, 6)
 
         # Collect unique defect types across Top 3 of all 5 models
         defect_sums = defaultdict(float)

@@ -29,7 +29,8 @@ from openpyxl.drawing.text import (
 )
 import pandas as pd
 
-from pipeline_common import extract_site_name, save_with_fallback
+# Unused legacy import commented out to prevent ModuleNotFoundError
+# from pipeline_common import extract_site_name, save_with_fallback
 
 # Define paths relative to the current script directory
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))

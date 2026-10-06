@@ -69,30 +69,81 @@ Hệ thống tự động hóa toàn diện quy trình xử lý, đối chiếu 
 
 ---
 
-## 3. Cách chạy công cụ
+## 3. Kiến trúc Proactive Multi-Agent System (Tối ưu hóa quy trình)
 
-### Cách 1: Click đúp vào file Launcher (Dành cho người dùng Windows)
-Chỉ cần click đúp vào file [`Run_QAStation_Tool.bat`](Run_QAStation_Tool.bat). Toàn bộ quy trình sẽ tự động thực thi và tự động mở thư mục `Output/` khi hoàn tất.
+Dự án tích hợp hệ thống **3 Proactive Agents** chuyên biệt giải quyết triệt để 3 nút thắt lớn nhất của pipeline:
 
-### Cách 2: Chạy bằng lệnh Python
-```cmd
-pip install -r requirements.txt
-python process_qastation.py
 ```
-*(Hoặc chạy độc lập riêng module PowerPoint bất kỳ lúc nào: `python process_pptx.py`)*
++-----------------------------------------------------------------------------------+
+|                        HFPA PROACTIVE AGENTIC WORKFLOW                            |
++-----------------------------------------------------------------------------------+
+                                          |
+    +-------------------------------------+-----------------------------------+
+    |                                     |                                   |
+    v                                     v                                   v
+[Agent 1: Ingestion & Health]       [Agent 2: In-Memory Unified]        [Agent 3: Audit & PPTX]
+ - Non-destructive staging           - Single-pass pipeline              - Semantic shape binding
+ - Factory readiness check (4/4)     - In-memory data bus                - Anomaly detection (>10%)
+ - Non-blocking lock detection       - Vectorized Hamilton allocator     - Unmapped defect alerts
+ - Continuous watcher / scheduler    - High-speed Excel streaming        - Automated Executive Brief
+```
+
+1. **Agent 1: [`IngestionWatcherAgent`](agents/ingestion_watcher_agent.py)**:
+   - Tự động giám sát thư mục đầu vào `Input/FTT` và `Input/HFPA`.
+   - Kiểm tra ma trận sẵn sàng 4/4 nhà máy (`VH`, `VH2`, `JV`, `JV2`).
+   - Kiểm tra file lock bất đồng bộ, không bao giờ làm treo script khi file đang mở trong Excel/Office.
+   - Hỗ trợ chế độ Daemon Watcher tự động kích hoạt xử lý khi dữ liệu tháng đầy đủ.
+
+2. **Agent 2: [`ReconciliationEngineAgent`](agents/reconciliation_engine_agent.py)**:
+   - Loại bỏ hoàn toàn quy trình đọc/ghi lặp lại 3 lần trên đĩa bằng bộ nhớ dùng chung `DataBus`.
+   - Tích hợp bộ khớp thông minh 2 lượt (Dual-Pass Smart Matcher), giải quyết triệt để sự sai lệch tên xưởng (`N1` vs `N2`) giữa trạm kiểm tra và MES410.
+   - Thuật toán số dư lớn nhất (Hamilton Largest Remainder) đảm bảo tổng lỗi khớp tuyệt đối với MES410 theo số nguyên.
+   - Tăng tốc xuất file Excel dung lượng lớn (25MB) nhanh hơn gấp nhiều lần.
+
+3. **Agent 3: [`QualityAuditPPTXAgent`](agents/quality_audit_pptx_agent.py)**:
+   - Liên kết biểu đồ PowerPoint theo vị trí không gian thông minh, chống gãy vỡ khi đổi mẫu slide.
+   - Tự động phát hiện các lot bất thường có độ lệch lỗi cao (>= 3 đôi hoặc >10%).
+   - Tự động đối chiếu và cảnh báo các loại lỗi mới chưa có mã màu trong [`Color_template.xlsx`](Color_template.xlsx).
+   - Xuất bản báo cáo điều hành chuyên sâu: [`Output/Executive_Quality_Brief_<Month>_<Year>.md`](Output/) và bản HTML.
 
 ---
 
-## 4. Các file kết quả đầu ra (`Output/` & `logs/`)
+## 4. Cách chạy hệ thống
 
-*Tất cả các file đầu ra trong `Output/` và `logs/` đều được tự động gắn kèm **tháng và năm** từ dữ liệu đầu vào (ví dụ: `_Jun_2026`).*
+### Cách 1: Click đúp vào file Launcher [`Run_QAStation_Tool.bat`](Run_QAStation_Tool.bat)
+Giao diện trực quan cho phép lựa chọn:
+- `[1]` Chạy Proactive Multi-Agent Pipeline (Nhanh, đầy đủ báo cáo điều hành) [Mặc định]
+- `[2]` Kiểm tra tính đầy đủ 4 nhà máy và tình trạng khóa file (Không chạy pipeline)
+- `[3]` Bật chế độ Agent Watcher tự động giám sát thư mục đầu vào
+- `[4]` Chạy quy trình legacy cũ (`process_qastation.py`)
+
+### Cách 2: Chạy trực tiếp qua lệnh Python
+```bash
+# Chạy toàn bộ hệ thống Multi-Agent
+python -m agents.hfpa_agent_orchestrator --run
+
+# Kiểm tra sức khỏe dữ liệu đầu vào (Pre-flight health check)
+python -m agents.hfpa_agent_orchestrator --check
+
+# Chạy chế độ tự động giám sát liên tục (Daemon Watcher)
+python -m agents.hfpa_agent_orchestrator --watch --interval 10
+```
+
+---
+
+## 5. Các file kết quả đầu ra (`Output/` & `logs/`)
+
+*Tất cả các file đầu ra trong `Output/` và `logs/` đều được tự động gắn kèm **tháng và năm** từ dữ liệu đầu vào (ví dụ: `_Jul_2026`).*
 
 | Tên file | Vị trí | Mô tả |
 | :--- | :--- | :--- |
-| **`HFPA_Performance_Report_<Month>_<Year>.pptx`** | `Output/` | **Báo cáo thuyết trình PowerPoint hoàn chỉnh**: Tự động điền số liệu, 12 biểu đồ chuẩn màu sắc và tích hợp hyperlinks tương tác trỏ chính xác đến các file cùng tháng. |
+| **`Executive_Quality_Brief_<Month>_<Year>.md`** | `Output/` | **Báo cáo điều hành chuyên sâu**: Tổng hợp KPI, cảnh báo bất thường và khuyến nghị hành động cho ban giám đốc. |
+| **`Executive_Quality_Brief_<Month>_<Year>.html`** | `Output/` | Bản HTML trực quan của báo cáo điều hành để mở nhanh trên trình duyệt. |
+| **`HFPA_Performance_Report_<Month>_<Year>.pptx`** | `Output/` | **Báo cáo thuyết trình PowerPoint hoàn chỉnh**: Tự động điền số liệu, 12 biểu đồ chuẩn màu sắc và tích hợp hyperlinks tương tác. |
 | **`HFPA_FTT_Combined_Master_<Month>_<Year>.xlsx`** | `Output/` | **1 file combine tổng duy nhất** chứa toàn bộ dữ liệu gồm 6 sheet: `HFPA_Quality_Tracking`, `HFPA_Mes410`, `Pivot1_Validation`, `Top5_Models`, `Top3_Defects`, `Lot_Defect_Variance`. |
 | **`HFPA_Template_Updated_<Month>_<Year>.xlsx`** | `Output/` | File cơ sở dữ liệu mẫu đã được cập nhật số liệu mới của tháng, giữ nguyên 100% công thức. |
 | **`QAStation_HFPA_Analysis_Report_<Month>_<Year>.xlsx`** | `Output/` | Báo cáo phân tích chất lượng trực quan chuyên sâu kèm mã màu chip lỗi. |
 | **`HFPA_Template.xlsx`** | `Database/` | File master template gốc cũng được tự động đồng bộ số liệu mới nhất. |
 | **`HFPA_Template.pptx`** | `Database/` | File master template PowerPoint gốc được cập nhật đồng bộ. |
 | **`reconciliation_audit_trail_<Month>_<Year>.csv`** | `logs/` | Bảng truy vết toàn bộ các lot có sự sai lệch được hiệu chỉnh từ QAStation sang Mes410. |
+

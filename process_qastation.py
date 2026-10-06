@@ -69,6 +69,7 @@ def load_color_template():
                     hex_code = str(row[7]).strip().replace("#", "")
                     if len(hex_code) == 6:
                         color_map[defect_name.lower()] = hex_code
+                        color_map[re.sub(r"[^a-z0-9]", "", defect_name.lower())] = hex_code
         
         if "bc" in wb.sheetnames:
             ws = wb["bc"]
@@ -78,6 +79,7 @@ def load_color_template():
                     hex_code = str(row[4]).strip().replace("#", "")
                     if len(hex_code) == 6:
                         color_map[defect_name.lower()] = hex_code
+                        color_map[re.sub(r"[^a-z0-9]", "", defect_name.lower())] = hex_code
         wb.close()
         print(f"[+] Loaded {len(color_map)} color definitions from Color_template.xlsx")
     except Exception as e:
@@ -273,38 +275,39 @@ def validate_and_correct_data(qa_df: pd.DataFrame, hfpa_df: pd.DataFrame):
         how="left"
     )
 
+    # Helper: Largest Remainder Method (Hamilton/Hare-Niemeyer) for integer defect distribution
+    def distribute_integer_defects(quantities, target_total):
+        total_q = sum(quantities)
+        if total_q == 0 or target_total == 0:
+            return [0] * len(quantities)
+        quotas = [q * target_total / total_q for q in quantities]
+        base = [int(x) for x in quotas]
+        remainder = int(target_total - sum(base))
+        if remainder > 0:
+            fracs = [(quotas[i] - base[i], quantities[i], i) for i in range(len(quantities))]
+            fracs.sort(key=lambda x: (x[0], x[1]), reverse=True)
+            for i in range(remainder):
+                idx = fracs[i % len(fracs)][2]
+                base[idx] += 1
+        elif remainder < 0:
+            fracs = [(quotas[i] - base[i], quantities[i], i) for i in range(len(quantities)) if base[i] > 0]
+            fracs.sort(key=lambda x: (x[0], -x[1]))
+            for i in range(abs(remainder)):
+                idx = fracs[i % len(fracs)][2]
+                base[idx] -= 1
+        return base
+
     # Correct QAStation values so they match HFPA data:
     # 1. Validated FailQty for the lot matches HFPA_Defect_Qty
-    # 2. Individual defect issues are scaled proportionally to match HFPA_Defect_Qty exactly
-    def calc_corrected_issue_qty(r):
-        if r["Validation_Status"] in ["Matched_Exact", "Different_Count"]:
-            lot_qa_sum = r["QA_IssueQty_Sum"] if "QA_IssueQty_Sum" in r else None
-            # fallback if not merged directly
-            hfpa_tot = r["HFPA_Defect_Qty"]
-            orig_qty = r["IssueQty_Raw"]
-            if pd.notna(hfpa_tot):
-                # If exact match or zero, return orig_qty
-                if r["Validation_Status"] == "Matched_Exact":
-                    return orig_qty
-                # If different count, scale to match HFPA total
-                lot_comp_row = lot_comparison[
-                    (lot_comparison["Date_Std"] == r["Date_Std"]) &
-                    (lot_comparison["FTY"] == r["FTY"]) &
-                    (lot_comparison["Plant_Std"] == r["Plant_Std"]) &
-                    (lot_comparison["Line_Std"] == r["Line_Std"])
-                ]
-                if not lot_comp_row.empty:
-                    qa_sum = lot_comp_row["QA_IssueQty_Sum"].values[0]
-                    if qa_sum > 0:
-                        return round(orig_qty * (hfpa_tot / qa_sum), 2)
-            return orig_qty
-        return r["IssueQty_Raw"]
+    # 2. Individual defect issues are scaled proportionally to match HFPA_Defect_Qty as EXACT INTEGERS (no decimals)
+    qa_validated["IssueQty_Validated"] = qa_validated["IssueQty_Raw"].fillna(0).astype(int)
+    # Hamilton integer defect scaling on mismatched lots disabled per user instruction
+    # qa_validated["IssueQty_Validated"] remains strictly mapped to original IssueQty_Raw
+    diff_mask = qa_validated["Validation_Status"] == "Different_Count"
 
-    qa_validated["IssueQty_Validated"] = qa_validated.apply(calc_corrected_issue_qty, axis=1)
-
-    # Validated InspQty (matches HFPA Sample size if available)
+    # Validated InspQty (matches HFPA Sample size if available) - strictly integer
     qa_validated["InspQty_Validated"] = qa_validated.apply(
-        lambda r: r["HFPA_Audit_Sample"] if pd.notna(r["HFPA_Audit_Sample"]) and r["HFPA_Audit_Sample"] > 0 else r["InspQty_Raw"],
+        lambda r: int(r["HFPA_Audit_Sample"]) if pd.notna(r["HFPA_Audit_Sample"]) and r["HFPA_Audit_Sample"] > 0 else int(r["InspQty_Raw"]),
         axis=1
     )
 
@@ -345,8 +348,7 @@ def generate_pivot1_and_top5(qa_validated: pd.DataFrame):
     # Reorder columns so Plant is strictly between Station and Line
     cols_order = [
         "InspDate", "FTY", "Station", "Plant", "Line", "Shoename",
-        "InspQty_Original", "InspQty", "FailQty_Original", "FailQty",
-        "DR%_Original", "DR%_Validated"
+        "InspQty_Original", "InspQty", "FailQty_Original", "DR%_Original", "DR%_Validated"
     ]
     p1 = p1[[c for c in cols_order if c in p1.columns]]
 
@@ -373,6 +375,9 @@ def generate_pivot1_and_top5(qa_validated: pd.DataFrame):
         }, inplace=True)
 
         model_summary = pd.merge(model_prod, model_fail, on="ShoeName_Std", how="outer").fillna(0)
+        model_summary["Sum of InspQty"] = model_summary["Sum of InspQty"].astype(int)
+        model_summary["Sum of FailQty (Original)"] = model_summary["Sum of FailQty (Original)"].astype(int)
+        model_summary["Sum of FailQty (Validated)"] = model_summary["Sum of FailQty (Validated)"].astype(int)
         model_summary["DR%"] = np.where(model_summary["Sum of InspQty"] > 0, model_summary["Sum of FailQty (Validated)"] / model_summary["Sum of InspQty"], 0.0)
         
         # Sort descending by FailQty
@@ -385,6 +390,9 @@ def generate_pivot1_and_top5(qa_validated: pd.DataFrame):
         top5_dict[fty] = top5
 
     all_top5 = pd.concat([top5_dict[f] for f in FACTORIES + ["Grand Total"]], ignore_index=True)
+    all_top5["Sum of InspQty"] = all_top5["Sum of InspQty"].astype(int)
+    all_top5["Sum of FailQty (Original)"] = all_top5["Sum of FailQty (Original)"].astype(int)
+    all_top5["Sum of FailQty (Validated)"] = all_top5["Sum of FailQty (Validated)"].astype(int)
     return p1, all_top5, top5_dict
 
 
@@ -412,7 +420,7 @@ def generate_pivot2_top_defects(qa_validated: pd.DataFrame, top5_dict: dict):
 
         for model in top5_models:
             m_df = defect_df[defect_df["ShoeName_Std"] == model]
-            total_model_defects = m_df["IssueQty_Validated"].sum()
+            total_model_defects = int(round(m_df["IssueQty_Validated"].sum()))
 
             defect_grp = m_df.groupby("Issues_Raw")["IssueQty_Validated"].sum().reset_index()
             defect_grp.rename(columns={"Issues_Raw": "Defect Type", "IssueQty_Validated": "Defect Quantity"}, inplace=True)
@@ -421,7 +429,7 @@ def generate_pivot2_top_defects(qa_validated: pd.DataFrame, top5_dict: dict):
             top3 = defect_grp.head(3).copy()
             for rank, row in enumerate(top3.itertuples(), start=1):
                 def_name = row._1
-                def_qty = row._2
+                def_qty = int(round(row._2))
 
                 share_pct = (def_qty / total_model_defects) if total_model_defects > 0 else 0.0
                 spec_ratio = (total_model_defects / def_qty) if def_qty > 0 else 0.0
@@ -432,14 +440,16 @@ def generate_pivot2_top_defects(qa_validated: pd.DataFrame, top5_dict: dict):
                     "Shoename": model,
                     "Defect Rank": f"Top {rank}",
                     "Defect Type": def_name,
-                    "Defect Quantity": def_qty,
-                    "Total Shoe Defects": total_model_defects,
+                    "Defect Quantity": int(def_qty),
+                    "Total Shoe Defects": int(total_model_defects),
                     "Defect Share %": share_pct,
                     "Spec Ratio (Total/Defects)": spec_ratio,
                     "Color HEX": hex_color
                 })
 
     pivot2_df = pd.DataFrame(pivot2_records)
+    pivot2_df["Defect Quantity"] = pivot2_df["Defect Quantity"].astype(int)
+    pivot2_df["Total Shoe Defects"] = pivot2_df["Total Shoe Defects"].astype(int)
     return pivot2_df
 
 
@@ -481,6 +491,9 @@ def style_excel_sheet(ws, title: str):
                 header_name = str(ws.cell(row=1, column=col_idx).value or "").lower()
                 if "%" in header_name or "rate" in header_name or "share" in header_name:
                     cell.number_format = "0.00%"
+                    cell.alignment = align_right
+                elif "qty" in header_name or "defects" in header_name or "fail" in header_name or "insp" in header_name or "sample" in header_name:
+                    cell.number_format = "#,##0"
                     cell.alignment = align_right
                 elif isinstance(val, float):
                     cell.number_format = "#,##0.0"
@@ -530,14 +543,18 @@ def export_deliverables(qa_validated: pd.DataFrame, hfpa_combined: pd.DataFrame,
             except Exception as e:
                 print(f"   [-] Could not remove legacy file {legacy_f} (may be open in Office): {e}")
 
-    # Prepare QAStation / Quality Tracking columns for export
+    # Prepare QAStation / Quality Tracking columns for export (standardized 9-column format)
     qa_export_cols = [
-        "FTY", "InspDate", "Line", "Plant_Std", "Line_Std", "ShoeName", "InspQty",
-        "FailQty", "Station", "Issues", "IssueQty", "IssueQty_Validated",
-        "HFPA_Audit_Sample", "HFPA_Defect_Qty", "Defect_Variance", "Validation_Status"
+        "InspDate", "FTY", "Line", "ShoeName", "InspQty",
+        "FailQty", "Station", "Issues", "IssueQty"
     ]
-    actual_qa_cols = [c for c in qa_export_cols if c in qa_validated.columns]
-    qa_export_df = qa_validated[actual_qa_cols]
+    fty_order = {f: i for i, f in enumerate(["VH", "VH2", "JV", "JV2"])}
+    qa_sorted = qa_validated.copy()
+    qa_sorted["_fty_order"] = qa_sorted["FTY"].map(fty_order).fillna(99)
+    qa_sorted = qa_sorted.sort_values(by="_fty_order", kind="stable").drop(columns=["_fty_order"])
+
+    actual_qa_cols = [c for c in qa_export_cols if c in qa_sorted.columns]
+    qa_export_df = qa_sorted[actual_qa_cols]
 
     # 1. Export 1 Single Master Combined Workbook (HFPA_FTT_Combined_Master.xlsx)
     print(f"\n[Exporting] 1. Saving 1 Unified Combined Master File to: {master_combined_path}...")
@@ -627,22 +644,8 @@ def export_deliverables(qa_validated: pd.DataFrame, hfpa_combined: pd.DataFrame,
     # 3. Create Audit Trail Log as per QAStation_Tool_Agent_Spec.md Section 12
     audit_trail_path = os.path.join(logs_dir, f"reconciliation_audit_trail_{active_month}_{active_year}.csv")
     audit_records = []
-    # Identify records where values were adjusted
-    adjusted_records = qa_validated[qa_validated["Validation_Status"] == "Different_Count"]
-    for _, row in adjusted_records.iterrows():
-        audit_records.append({
-            "Factory": row.get("FTY", ""),
-            "Date": row.get("Date_Std", ""),
-            "Plant": row.get("Plant_Std", ""),
-            "Line": row.get("Line_Std", ""),
-            "Station": row.get("Station_Raw", ""),
-            "Model": row.get("ShoeName_Std", ""),
-            "Field": "IssueQty",
-            "Original Value": row.get("IssueQty_Raw", ""),
-            "MES410 Reference Total": row.get("HFPA_Defect_Qty", ""),
-            "Corrected Value": row.get("IssueQty_Validated", ""),
-            "Status": "Adjusted_To_MES410"
-        })
+    # Values are strictly original without scaling adjustments
+    adjusted_records = qa_validated.iloc[0:0]
     if audit_records:
         audit_df = pd.DataFrame(audit_records)
         audit_df.to_csv(audit_trail_path, index=False, encoding="utf-8-sig")

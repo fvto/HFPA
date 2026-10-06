@@ -18,6 +18,7 @@ import glob
 import re
 import sys
 import shutil
+import math
 import openpyxl
 import pandas as pd
 import pptx
@@ -390,6 +391,8 @@ def extract_pipeline_data(target_month=None, target_year=None):
             "start_row": start_row,
             "end_row": end_row,
             "defect_cols": defect_cols,
+            "hdr_row": hdr_row,
+            "fty": fty,
         }
 
     wb.close()
@@ -460,20 +463,32 @@ def update_slide_metrics_and_links(slide, data):
             for sub in s.shapes:
                 if sub.name == "Oval 109":
                     tf = sub.text_frame
-                    tf.word_wrap = False
+                    tf.word_wrap = True
                     tf.margin_left = tf.margin_right = tf.margin_top = tf.margin_bottom = 0
                     tf.clear()
                     p0 = tf.paragraphs[0]
                     p0.alignment = PP_ALIGN.CENTER
+                    p0.space_before = Pt(0)
+                    p0.space_after = Pt(0)
                     r0 = p0.add_run()
-                    r0.text = "Total pair produced"
-                    set_run_font(r0, name="Calibri", size_pt=8.5, bold=True, color_rgb=(255, 255, 255))
+                    r0.text = "Total pair"
+                    set_run_font(r0, name="Calibri", size_pt=8, bold=True, color_rgb=(255, 255, 255))
 
                     p1 = tf.add_paragraph()
                     p1.alignment = PP_ALIGN.CENTER
+                    p1.space_before = Pt(0)
+                    p1.space_after = Pt(1)
                     r1 = p1.add_run()
-                    r1.text = f"~{round(g_total['prod'] / 1000):,}K"
-                    set_run_font(r1, name="Calibri", size_pt=16, bold=True, color_rgb=(255, 255, 255))
+                    r1.text = "produced"
+                    set_run_font(r1, name="Calibri", size_pt=8, bold=True, color_rgb=(255, 255, 255))
+
+                    p2 = tf.add_paragraph()
+                    p2.alignment = PP_ALIGN.CENTER
+                    p2.space_before = Pt(0)
+                    p2.space_after = Pt(0)
+                    r2 = p2.add_run()
+                    r2.text = f"~{round(g_total['prod'] / 1000):,}K"
+                    set_run_font(r2, name="Calibri", size_pt=15, bold=True, color_rgb=(255, 255, 255))
                     sub.click_action.hyperlink.address = rf"../Output/{updated_excel_name}"
 
                 if sub.shape_type == pptx.enum.shapes.MSO_SHAPE_TYPE.GROUP:
@@ -573,14 +588,10 @@ def update_slide_metrics_and_links(slide, data):
                 set_run_font(r1, name="Calibri", size_pt=9.5, bold=True, color_rgb=(0, 0, 0))
                 s.click_action.hyperlink.address = rf"../Output/{analysis_excel_name}"
 
-        # 6. Side note: Rectangle 55
+        # 6. Side note: Rectangle 55 (instruction note for report author; remove from final presentation output)
         if s.name == "Rectangle 55":
-            tf = s.text_frame
-            tf.word_wrap = True
-            for p in tf.paragraphs:
-                for r in p.runs:
-                    r.font.name = "Calibri"
-                    r.font.size = Pt(9.5)
+            sp = s._element
+            sp.getparent().remove(sp)
 
 
 # ======================================================================
@@ -627,6 +638,9 @@ def create_defect_color_legend_table(slide, data, color_map, fallback_cache):
             "Midsole/Outsole to upper bond gap",
         ]
 
+    # Sort defects by character length ascending (least to most characters), with alphabetical tie-breaker
+    all_defects_ordered = sorted(all_defects_ordered, key=lambda s: (len(str(s).strip()), str(s).strip().lower()))
+
     # Arrange into 2-column grid (left column first, then right column)
     total = len(all_defects_ordered)
     rows = (total + 1) // 2  # ceil division
@@ -636,74 +650,66 @@ def create_defect_color_legend_table(slide, data, color_map, fallback_cache):
     left_defects = all_defects_ordered[:rows]
     right_defects = all_defects_ordered[rows:]
 
-    print(f"   [i] Legend defects ({total} total): Left={left_defects}, Right={right_defects}")
+    print(f"   [i] Legend defects ({total} total, sorted by character length): Left={left_defects}, Right={right_defects}")
 
     left = 8588371
     top = 580000
     width = 2855916
-    height = 760000  # Ends at 1,340,000 (leaves 190,000 EMU gap before Chart 63 at 1,529,828)
 
-    # 3. Render high-resolution 4x image
-    row_h_px = 68  # fixed row height in pixels
-    w_px = 1250
+    # 3. Render high-resolution RGBA image (transparent background so empty cells have NO FILL)
+    row_h_px = 72  # fixed row height in pixels
+    w_px = 1400
     h_px = rows * row_h_px
-    img = Image.new("RGB", (w_px, h_px), (255, 255, 255))
+    height = int(width * h_px / w_px)  # Maintain exact aspect ratio (~734,000 EMU, leaving ~215,000 EMU gap before Chart 63)
+
+    img = Image.new("RGBA", (w_px, h_px), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
     font = None
     for fp in ["C:/Windows/Fonts/calibri.ttf", "C:/Windows/Fonts/arial.ttf", "calibri.ttf", "arial.ttf"]:
         if os.path.exists(fp):
             try:
-                font = ImageFont.truetype(fp, 28)
+                font = ImageFont.truetype(fp, 33)  # Increased font size for enhanced readability
                 break
             except Exception:
                 pass
     if font is None:
         font = ImageFont.load_default()
 
-    col_xs = [0, 100, 490, 590, 1250]
+    # Balanced 2-column layout (equal text column width = 615px each)
+    col_xs = [0, 85, 700, 785, 1400]
 
     for r in range(rows):
         y0 = r * row_h_px
         y1 = (r + 1) * row_h_px
 
-        # Left chip
+        # Left chip & text
         if r < len(left_defects):
             dname1 = left_defects[r]
             hex1 = get_defect_color(dname1, color_map, fallback_cache)
-            c1 = (int(hex1[0:2], 16), int(hex1[2:4], 16), int(hex1[4:6], 16))
-            draw.rectangle([col_xs[0], y0, col_xs[1], y1], fill=c1, outline=(0, 0, 0), width=1)
+            c1 = (int(hex1[0:2], 16), int(hex1[2:4], 16), int(hex1[4:6], 16), 255)
+            draw.rectangle([col_xs[0], y0, col_xs[1], y1], fill=c1, outline=(0, 0, 0, 255), width=1)
 
-            # Left text
-            draw.rectangle([col_xs[1], y0, col_xs[2], y1], fill=(255, 255, 255), outline=(0, 0, 0), width=1)
+            # Left text (white background for readability)
+            draw.rectangle([col_xs[1], y0, col_xs[2], y1], fill=(255, 255, 255, 255), outline=(0, 0, 0, 255), width=1)
             bbox1 = font.getbbox(dname1)
             th1 = bbox1[3] - bbox1[1]
             ty1 = y0 + (y1 - y0 - th1) // 2 - bbox1[1]
-            draw.text((col_xs[1] + 12, ty1), dname1, fill=(0, 0, 0), font=font)
-        else:
-            draw.rectangle([col_xs[0], y0, col_xs[1], y1], fill=(255, 255, 255), outline=(0, 0, 0), width=1)
-            draw.rectangle([col_xs[1], y0, col_xs[2], y1], fill=(255, 255, 255), outline=(0, 0, 0), width=1)
+            draw.text((col_xs[1] + 15, ty1), dname1, fill=(0, 0, 0, 255), font=font)
 
-        # Right chip
+        # Right chip & text
         if r < len(right_defects):
             dname2 = right_defects[r]
             hex2 = get_defect_color(dname2, color_map, fallback_cache)
-            c2 = (int(hex2[0:2], 16), int(hex2[2:4], 16), int(hex2[4:6], 16))
-            draw.rectangle([col_xs[2], y0, col_xs[3], y1], fill=c2, outline=(0, 0, 0), width=1)
+            c2 = (int(hex2[0:2], 16), int(hex2[2:4], 16), int(hex2[4:6], 16), 255)
+            draw.rectangle([col_xs[2], y0, col_xs[3], y1], fill=c2, outline=(0, 0, 0, 255), width=1)
 
-            # Right text
-            draw.rectangle([col_xs[3], y0, col_xs[4] - 1, y1], fill=(255, 255, 255), outline=(0, 0, 0), width=1)
+            # Right text (white background for readability)
+            draw.rectangle([col_xs[3], y0, col_xs[4] - 1, y1], fill=(255, 255, 255, 255), outline=(0, 0, 0, 255), width=1)
             bbox2 = font.getbbox(dname2)
             th2 = bbox2[3] - bbox2[1]
             ty2 = y0 + (y1 - y0 - th2) // 2 - bbox2[1]
-            draw.text((col_xs[3] + 12, ty2), dname2, fill=(0, 0, 0), font=font)
-        else:
-            # Empty white cells with border
-            draw.rectangle([col_xs[2], y0, col_xs[3], y1], fill=(255, 255, 255), outline=(0, 0, 0), width=1)
-            draw.rectangle([col_xs[3], y0, col_xs[4] - 1, y1], fill=(255, 255, 255), outline=(0, 0, 0), width=1)
-
-    # Outer border
-    draw.rectangle([0, 0, w_px - 1, h_px - 1], outline=(0, 0, 0), width=1)
+            draw.text((col_xs[3] + 15, ty2), dname2, fill=(0, 0, 0, 255), font=font)
 
     rendered_img_path = os.path.join(OUTPUT_DIR, "defect_legend_rendered.png")
     img.save(rendered_img_path, "PNG")
@@ -940,6 +946,52 @@ def update_top5_models_chart(chart_shape, top5_list, start_row, end_row, target_
             if p is not None and p.find(qn('a:pPr')) is not None and p.find(qn('a:pPr')).find(qn('a:defRPr')) is not None:
                 p.find(qn('a:pPr')).find(qn('a:defRPr')).set('sz', '600')
 
+    # Dynamic valAx scaling: ensure highest DR% never hits the chart ceiling or clips outEnd labels
+    valAx = plot_area.find(qn('c:valAx'))
+    if valAx is not None:
+        scaling = valAx.find(qn('c:scaling'))
+        if scaling is not None:
+            max_val = max(dr_vals) if dr_vals else 0.0
+            target_max = 0.05 if max_val <= 0.038 else round(math.ceil(max_val * 1.35 * 100) / 100, 2)
+            max_elem = scaling.find(qn('c:max'))
+            if max_elem is not None:
+                max_elem.set('val', str(target_max))
+            else:
+                scaling.append(parse_xml(f'<c:max xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" val="{target_max}"/>'))
+            min_elem = scaling.find(qn('c:min'))
+            if min_elem is not None:
+                min_elem.set('val', '0')
+            else:
+                scaling.append(parse_xml('<c:min xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" val="0"/>'))
+
+    # Standardize plotArea layout across all factories for consistent top margin
+    layout = plot_area.find(qn('c:layout'))
+    if layout is not None:
+        ml = layout.find(qn('c:manualLayout'))
+        if ml is not None:
+            y_elem = ml.find(qn('c:y'))
+            if y_elem is not None:
+                y_elem.set('val', '0.285')
+            h_elem = ml.find(qn('c:h'))
+            if h_elem is not None:
+                h_elem.set('val', '0.442')
+
+    # Standardize legend position to top-left to avoid overlap with column bars or data labels
+    chart_elem = chart_space.find(qn('c:chart'))
+    if chart_elem is not None:
+        leg = chart_elem.find(qn('c:legend'))
+        if leg is not None:
+            l_layout = leg.find(qn('c:layout'))
+            if l_layout is not None:
+                l_ml = l_layout.find(qn('c:manualLayout'))
+                if l_ml is not None:
+                    lx_elem = l_ml.find(qn('c:x'))
+                    if lx_elem is not None:
+                        lx_elem.set('val', '0.0600645231846019')
+                    ly_elem = l_ml.find(qn('c:y'))
+                    if ly_elem is not None:
+                        ly_elem.set('val', '0.0259601924759405')
+
     update_chart_relationships(chart_shape, target_excel_name=target_excel_name)
 
 
@@ -969,8 +1021,10 @@ def update_top_defects_chart(chart_shape, defect_matrix, color_map, fallback_cac
         if child.tag.endswith('varyColors') or child.tag.endswith('grouping'):
             insert_pos = idx + 1
 
+    hdr_row = defect_matrix.get("hdr_row", 21)
+    sheet_name = "HFPA"
     cat_pts = "".join([f'<c:pt idx="{i}"><c:v>{m}</c:v></c:pt>' for i, m in enumerate(models)])
-    cat_f = f"'Current month'!$L${start_row}:$L${end_row}"
+    cat_f = f"'{sheet_name}'!$L${start_row}:$L${end_row}"
 
     for s_idx, d_name in enumerate(defects):
         hex_color = get_defect_color(d_name, color_map, fallback_cache)
@@ -991,7 +1045,7 @@ def update_top_defects_chart(chart_shape, defect_matrix, color_map, fallback_cac
           <c:order val="{s_idx}"/>
           <c:tx>
             <c:strRef>
-              <c:f>'Current month'!${col_letter}$21</c:f>
+              <c:f>'{sheet_name}'!${col_letter}${hdr_row}</c:f>
               <c:strCache>
                 <c:ptCount val="1"/>
                 <c:pt idx="0"><c:v>{d_name}</c:v></c:pt>
@@ -1038,7 +1092,7 @@ def update_top_defects_chart(chart_shape, defect_matrix, color_map, fallback_cac
           </c:cat>
           <c:val>
             <c:numRef>
-              <c:f>'Current month'!${col_letter}${start_row}:${col_letter}${end_row}</c:f>
+              <c:f>'{sheet_name}'!${col_letter}${start_row}:${col_letter}${end_row}</c:f>
               <c:numCache>
                 <c:formatCode>0.00%</c:formatCode>
                 <c:ptCount val="{len(models)}"/>
@@ -1050,7 +1104,24 @@ def update_top_defects_chart(chart_shape, defect_matrix, color_map, fallback_cac
         """
         bar_chart.insert(insert_pos + s_idx, parse_xml(ser_xml))
 
-    # Category axis font size = 6pt
+    # Calculate 1st Priority defect according to business rule:
+    # Rule: "Ưu tiên lỗi đó có nhiều model nhất sau đó sẽ xét tỷ lệ phần trăm"
+    # (Prioritize the defect appearing in the most models; if tied, compare total percentage)
+    defect_model_count = {}
+    defect_pct_sum = {}
+    for d in defects:
+        defect_model_count[d] = 0
+        defect_pct_sum[d] = 0.0
+        vals = values.get(d, [])
+        for v in vals:
+            if v is not None and v > 0:
+                defect_model_count[d] += 1
+                defect_pct_sum[d] += float(v)
+
+    ranked_defects = sorted(defects, key=lambda d: (defect_model_count.get(d, 0), defect_pct_sum.get(d, 0.0)), reverse=True)
+    first_priority_defect = ranked_defects[0] if ranked_defects else ""
+
+    # Category axis font size = 6pt & Update 'First priority: ...' in catAx title
     catAx = plot_area.find(qn('c:catAx'))
     if catAx is not None:
         txPr = catAx.find(qn('c:txPr'))
@@ -1058,6 +1129,33 @@ def update_top_defects_chart(chart_shape, defect_matrix, color_map, fallback_cac
             p = txPr.find(qn('a:p'))
             if p is not None and p.find(qn('a:pPr')) is not None and p.find(qn('a:pPr')).find(qn('a:defRPr')) is not None:
                 p.find(qn('a:pPr')).find(qn('a:defRPr')).set('sz', '600')
+
+        if first_priority_defect:
+            title = catAx.find(qn('c:title'))
+            if title is not None:
+                tx = title.find(qn('c:tx'))
+                if tx is not None:
+                    rich = tx.find(qn('c:rich'))
+                    if rich is not None:
+                        p = rich.find(qn('a:p'))
+                        if p is not None:
+                            # Clear old runs to eliminate typos (e.g. "Firsty prority")
+                            for r in p.findall(qn('a:r')):
+                                p.remove(r)
+                            new_r = parse_xml(
+                                f'<a:r xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+                                f'<a:rPr lang="en-US" sz="800" b="0" i="0" u="sng" baseline="0">'
+                                f'<a:solidFill><a:schemeClr val="tx1"/></a:solidFill>'
+                                f'<a:latin typeface="+mn-lt"/>'
+                                f'</a:rPr>'
+                                f'<a:t>First priority: {first_priority_defect}</a:t>'
+                                f'</a:r>'
+                            )
+                            end_para = p.find(qn('a:endParaRPr'))
+                            if end_para is not None:
+                                p.insert(list(p).index(end_para), new_r)
+                            else:
+                                p.append(new_r)
 
     update_chart_relationships(chart_shape, target_excel_name=target_excel_name)
 
